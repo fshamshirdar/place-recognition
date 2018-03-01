@@ -25,6 +25,12 @@ def train_model(train_loader, tripletnet, criterion, optimizer, epoch):
             anchor, positive, negative = anchor.cuda(), positive.cuda(), negative.cuda()
         anchor, positive, negative = Variable(anchor), Variable(positive), Variable(negative)
 
+#        f, axarr = plt.subplots(2,2)
+#        axarr[0,0].imshow(anchor[0].data.cpu().numpy().transpose((1, 2, 0)))
+#        axarr[0,1].imshow(positive[0].data.cpu().numpy().transpose((1, 2, 0)))
+#        axarr[1,0].imshow(negative[0].data.cpu().numpy().transpose((1, 2, 0)))
+#        plt.show()
+
         # compute output
         dist_a, dist_b, embedded_x, embedded_y, embedded_z = tripletnet(anchor, positive, negative)
         # 1 means, dist_a should be larger than dist_b
@@ -42,11 +48,12 @@ def train_model(train_loader, tripletnet, criterion, optimizer, epoch):
         loss.backward()
         optimizer.step()
 
-        print (loss.data)
+        print (loss)
 
 def train(datapath, epochs, args):
+    global model
+
     model.train()
-    model.training = True
 
     normalize = transforms.Normalize(
         #mean=[121.50361069 / 127., 122.37611083 / 127., 121.25987563 / 127.],
@@ -58,7 +65,7 @@ def train(datapath, epochs, args):
         transforms.Resize(227),
         transforms.CenterCrop(227),
         transforms.ToTensor(),
-        normalize
+#        normalize
     ])
 
     kwargs = {'num_workers': 1, 'pin_memory': True} if torch.cuda.is_available() else {}
@@ -125,7 +132,7 @@ if __name__ == "__main__":
 
     parser.add_argument('--mode', default='test', type=str, help='support option: train/test')
     parser.add_argument('--datapath', default='datapath', type=str, help='path st_lucia dataset')
-    parser.add_argument('--bsize', default=64, type=int, help='minibatch size')
+    parser.add_argument('--bsize', default=10, type=int, help='minibatch size')
     parser.add_argument('--margin', type=float, default=0.2, metavar='M', help='margin for triplet loss (default: 0.2)')
     parser.add_argument('--lr', type=float, default=0.01, metavar='LR', help='learning rate (default: 0.01)')
     parser.add_argument('--momentum', type=float, default=0.5, metavar='M', help='SGD momentum (default: 0.5)')
@@ -136,6 +143,7 @@ if __name__ == "__main__":
     parser.add_argument('--checkpoint', default="checkpoints", type=str, help='Checkpoint path')
     args = parser.parse_args()
 
+    global model
     checkpoint = torch.load(args.checkpoint)
     model.load_state_dict(checkpoint['state_dict'])
     if torch.cuda.is_available():

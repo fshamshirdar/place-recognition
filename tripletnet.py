@@ -8,9 +8,9 @@ class TripletNet(nn.Module):
         self.embeddingnet = embeddingnet
 
     def forward(self, x, y, z):
-        embedded_x = self.embeddingnet(x)
-        embedded_y = self.embeddingnet(y)
-        embedded_z = self.embeddingnet(z)
+        embedded_x = self.embeddingnet.features_extraction(x)
+        embedded_y = self.embeddingnet.features_extraction(y)
+        embedded_z = self.embeddingnet.features_extraction(z)
         dist_a = F.pairwise_distance(embedded_x, embedded_y, 2)
         dist_b = F.pairwise_distance(embedded_x, embedded_z, 2)
         return dist_a, dist_b, embedded_x, embedded_y, embedded_z
