@@ -3,324 +3,149 @@ from PIL import Image
 import numpy as np
 import time
 import math
+import matplotlib.pyplot as plt
 
 import argparse
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
 import torch.optim as optim
 from torchvision import transforms
 from torch.autograd import Variable
-from torch.autograd import Function
-from collections import OrderedDict
-from torch.legacy.nn import SpatialCrossMapLRN as SpatialCrossMapLRNOld
 
-# Training settings
-parser = argparse.ArgumentParser(description='PyTorch MNIST Example')
-parser.add_argument('--weightfile', type=str, default='', metavar='N')
-parser.add_argument('--file', type=str, default='', metavar='N')
-args = parser.parse_args()
+import model
+from dataset import TripletImageLoader
+from tripletnet import TripletNet
 
-"""
-OrderedDict([('conv1', Conv2d (3, 96, kernel_size=(11, 11), stride=(4, 4))), ('relu1', ReLU(inplace)), ('pool1', MaxPool2d(kernel_size=(3, 3), stride=(2, 2), dilation=(1, 1))), ('norm1', LRN(size=5, alpha=0.000100, beta=0.750000, k=1)), ('conv2', Conv2d (96, 256, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2), groups=2)), ('relu2', ReLU(inplace)), ('pool2', MaxPool2d(kernel_size=(3, 3), stride=(2, 2), dilation=(1, 1))), ('norm2', LRN(size=5, alpha=0.000100, beta=0.750000, k=1)), ('conv3', Conv2d (256, 384, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))), ('relu3', ReLU(inplace)), ('conv4', Conv2d (384, 384, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), groups=2)), ('relu4', ReLU(inplace)), ('conv5', Conv2d (384, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), groups=2)), ('relu5', ReLU(inplace)), ('conv6', Conv2d (256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), groups=2)), ('relu6', ReLU(inplace)), ('pool6', MaxPool2d(kernel_size=(3, 3), stride=(2, 2), dilation=(1, 1))), ('fc7_new', Sequential(
-  (0): view(nB, -1)
-  (1): Linear(in_features=9216, out_features=4096)
-)), ('relu7', ReLU(inplace)), ('drop7', Dropout(p=0.5, inplace)), ('fc8_new', Sequential(
-  (0): view(nB, -1)
-  (1): Linear(in_features=4096, out_features=2543)
-)), ('prob', Softmax(axis=1))])
-"""
+model = model.Net()
 
-class LRN(nn.Module):
-    def __init__(self, local_size=1, alpha=1.0, beta=0.75, ACROSS_CHANNELS=True):
-        super(LRN, self).__init__()
-        self.ACROSS_CHANNELS = ACROSS_CHANNELS
-        if ACROSS_CHANNELS:
-            self.average=nn.AvgPool3d(kernel_size=(local_size, 1, 1),
-                    stride=1,
-                    padding=(int((local_size-1.0)/2), 0, 0))
-        else:
-            self.average=nn.AvgPool2d(kernel_size=local_size,
-                    stride=1,
-                    padding=int((local_size-1.0)/2))
-        self.alpha = alpha
-        self.beta = beta
+def train_model(train_loader, tripletnet, criterion, optimizer, epoch):
+    # switch to train mode
+    tripletnet.train()
+    for batch_idx, (anchor, positive, negative) in enumerate(train_loader):
+        if torch.cuda.is_available():
+            anchor, positive, negative = anchor.cuda(), positive.cuda(), negative.cuda()
+        anchor, positive, negative = Variable(anchor), Variable(positive), Variable(negative)
 
-
-    def forward(self, x):
-        if self.ACROSS_CHANNELS:
-            div = x.pow(2).unsqueeze(1)
-            div = self.average(div).squeeze(1)
-            div = div.mul(self.alpha).add(1.0).pow(self.beta)
-        else:
-            div = x.pow(2)
-            div = self.average(div)
-            div = div.mul(self.alpha).add(1.0).pow(self.beta)
-        x = x.div(div)
-        return x
-
-"""
-class LRNFunc(Function):
-    def __init__(self, local_size, alpha=1e-4, beta=0.75, k=1):
-        super(LRNFunc, self).__init__()
-        self.size = local_size
-        self.alpha = alpha
-        self.beta = beta
-        self.k = k
-
-    def forward(self, input):
-        self.save_for_backward(input)
-        self.lrn = SpatialCrossMapLRNOld(self.size, self.alpha, self.beta, self.k)
-        self.lrn.type(input.type())
-        return self.lrn.forward(input)
-
-    def backward(self, grad_output):
-        input, = self.saved_tensors
-        return self.lrn.backward(input, grad_output)
-
-
-# use this one instead
-class LRN(nn.Module):
-    def __init__(self, local_size, alpha=1e-4, beta=0.75, k=1):
-        super(LRN, self).__init__()
-        self.size = local_size
-        self.alpha = alpha
-        self.beta = beta
-        self.k = k
-
-    def __repr__(self):
-        return 'LRN(size=%d, alpha=%f, beta=%f, k=%d)' % (self.size, self.alpha, self.beta, self.k)
-
-    def forward(self, input):
-        return LRNFunc(self.size, self.alpha, self.beta, self.k)(input)
-
-class Reshape(nn.Module):
-    def __init__(self, dims):
-        super(Reshape, self).__init__()
-        self.dims = dims
-
-    def __repr__(self):
-        return 'Reshape(dims=%s)' % (self.dims)
-
-    def forward(self, x):
-        orig_dims = x.size()
-        #assert(len(orig_dims) == len(self.dims))
-        new_dims = [orig_dims[i] if self.dims[i] == 0 else self.dims[i] for i in range(len(self.dims))]
+        # compute output
+        dist_a, dist_b, embedded_x, embedded_y, embedded_z = tripletnet(anchor, positive, negative)
+        # 1 means, dist_a should be larger than dist_b
+        target = torch.FloatTensor(dist_a.size()).fill_(1)
+        if torch.cuda.is_available():
+            target = target.cuda()
+        target = Variable(target)
         
-        return x.view(*new_dims).contiguous()
-"""
+        loss_triplet = criterion(dist_a, dist_b, target)
+        loss_embedd = embedded_x.norm(2) + embedded_y.norm(2) + embedded_z.norm(2)
+        loss = loss_triplet + 0.001 * loss_embedd
 
-class Net(nn.Module):
-    def __init__(self, training=True):
-        super(Net, self).__init__()
-        self.training = training
+        # compute gradient and do optimizer step
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
 
-        self.conv1 = nn.Conv2d(3, 96, kernel_size=11, stride=4, padding=0)
-        self.relu1 = nn.ReLU(inplace=True)
-        self.pool1 = nn.MaxPool2d(kernel_size=(3, 3), stride=(2, 2), dilation=(1, 1))
-        self.norm1 = LRN(local_size=5, alpha=0.000100, beta=0.750000)
-        self.conv2 = nn.Conv2d (96, 256, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2), groups=2)
-        self.relu2 = nn.ReLU(inplace=True)
-        self.pool2 = nn.MaxPool2d(kernel_size=(3, 3), stride=(2, 2), dilation=(1, 1))
-        self.norm2 = LRN(local_size=5, alpha=0.000100, beta=0.750000)
-        self.conv3 = nn.Conv2d (256, 384, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
-        self.relu3 = nn.ReLU(inplace=True)
-        self.conv4 = nn.Conv2d (384, 384, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), groups=2)
-        self.relu4 = nn.ReLU(inplace=True)
-        self.conv5 = nn.Conv2d (384, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), groups=2)
-        self.relu5 = nn.ReLU(inplace=True)
-        self.conv6 = nn.Conv2d (256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), groups=2)
-        self.relu6 = nn.ReLU(inplace=True)
-        self.pool6 = nn.MaxPool2d(kernel_size=(3, 3), stride=(2, 2), dilation=(1, 1))
-        self.fc7_new = nn.Linear(in_features=9216, out_features=4096)
-        self.relu7 = nn.ReLU(inplace=True)
-        self.drop7 = nn.Dropout(p=0.5, inplace=True)
-        self.fc8_new = nn.Linear(in_features=4096, out_features=2543)
-        self.prob = nn.Softmax()
+        print (loss.data)
 
-        """
-        self.features = nn.Sequential(
-            nn.Conv2d(3, 96, kernel_size=11, stride=4, padding=0),
-            nn.ReLU(inplace=True),
-            LRN(local_size=5, alpha=0.0001, beta=0.75),
-            nn.MaxPool2d(kernel_size=3, stride=2),
-            nn.Conv2d(96, 256, kernel_size=5, padding=2, groups=2),
-            nn.ReLU(inplace=True),
-            LRN(local_size=5, alpha=0.0001, beta=0.75),
-            nn.MaxPool2d(kernel_size=3, stride=2),
-            nn.Conv2d(256, 384, kernel_size=3, padding=1),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(384, 384, kernel_size=3, padding=1, groups=2),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(384, 256, kernel_size=3, padding=1, groups=2),
-            nn.ReLU(inplace=True),
-            nn.MaxPool2d(kernel_size=3, stride=2),
-        )
-        self.classifier = nn.Sequential(
-            nn.Linear(256 * 6 * 6, 4096),
-            nn.ReLU(inplace=True),
-            nn.Dropout(),
-            nn.Linear(4096, 4096),
-            nn.ReLU(inplace=True),
-            nn.Dropout(),
-            nn.Linear(4096, 2543),
-        )
-        """
-        """
-        self.features = nn.Sequential(OrderedDict([
-            ('conv1', nn.Conv2d (3, 96, kernel_size=(11, 11), stride=(4, 4))),
-            ('relu1', nn.ReLU(inplace=True)),
-            ('pool1', nn.MaxPool2d(kernel_size=(3, 3), stride=(2, 2), dilation=(1, 1))),
-            ('norm1', LRN(local_size=5, alpha=0.000100, beta=0.750000)),
-            ('conv2', nn.Conv2d (96, 256, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2), groups=2)),
-            ('relu2', nn.ReLU(inplace=True)),
-            ('pool2', nn.MaxPool2d(kernel_size=(3, 3), stride=(2, 2), dilation=(1, 1))),
-            ('norm2', LRN(local_size=5, alpha=0.000100, beta=0.750000)),
-            ('conv3', nn.Conv2d (256, 384, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))),
-            ('relu3', nn.ReLU(inplace=True)),
-            ('conv4', nn.Conv2d (384, 384, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), groups=2)),
-            ('relu4', nn.ReLU(inplace=True)),
-            ('conv5', nn.Conv2d (384, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), groups=2)),
-            ('relu5', nn.ReLU(inplace=True)),
-            ('conv6', nn.Conv2d (256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), groups=2)),
-            ('relu6', nn.ReLU(inplace=True)),
-            ('pool6', nn.MaxPool2d(kernel_size=(3, 3), stride=(2, 2), dilation=(1, 1))),
-        ]))
+def train(datapath, epochs, args):
+    model.train()
+    model.training = True
 
-        self.classifier = nn.Sequential(OrderedDict([
-            ('fc7_new', nn.Linear(in_features=9216, out_features=4096)),
-            ('relu7', nn.ReLU(inplace=True)),
-            ('drop7', nn.Dropout(p=0.5, inplace=True)),
-            ('fc8_new', nn.Linear(in_features=4096, out_features=2543))
-#             ('prob', nn.Softmax(axis=1))
-        ]))
-        """
+    normalize = transforms.Normalize(
+        #mean=[121.50361069 / 127., 122.37611083 / 127., 121.25987563 / 127.],
+        mean=[1., 1., 1.],
+        std=[1 / 127., 1 / 127., 1 / 127.]
+    )
 
-    def forward(self, x):
-        x = self.conv1(x)
-        x = self.relu1(x)
-        x = self.pool1(x)
-        x = self.norm1(x)
-        x = self.conv2(x)
-        x = self.relu2(x)
-        x = self.pool2(x)
-        x = self.norm2(x)
-        x = self.conv3(x)
-        x = self.relu3(x)
-        x = self.conv4(x)
-        x = self.relu4(x)
-        x = self.conv5(x)
-        x = self.relu5(x)
-        x = self.conv6(x)
-        x = self.relu6(x)
-        x = self.pool6(x)
-        x = x.view(x.size(0), 256 * 6 * 6)
-        x = self.fc7_new(x)
-        x = self.relu7(x)
-        if (self.training == True):
-            x = self.drop7(x)
-        x = self.fc8_new(x)
+    preprocess = transforms.Compose([
+        transforms.Resize(227),
+        transforms.CenterCrop(227),
+        transforms.ToTensor(),
+        normalize
+    ])
 
-#        x = F.relu(F.max_pool2d(self.conv1(x), 2))
-#        x = F.relu(F.max_pool2d(self.conv2_drop(self.conv2(x)), 2))
-#        x = x.view(-1, 80)
-#        x = F.relu(self.fc1(x))
-#        x = F.dropout(x, training=self.training)
-#        x = self.fc2(x)
-#        return F.log_softmax(x, dim=1)
-#        x = F.relu(F.max_pool2d(self.conv1(x), 2))
+    kwargs = {'num_workers': 1, 'pin_memory': True} if torch.cuda.is_available() else {}
+    train_loader = torch.utils.data.DataLoader(TripletImageLoader(datapath, size=100000, transform=preprocess), batch_size=args.bsize, shuffle=True, **kwargs)
 
-         # x = self.features(x)
-         # x = x.view(x.size(0), 256 * 6 * 6)
-         # x = self.classifier(x)
+    tripletnet = TripletNet(model)
 
-        return self.prob(x)
+    criterion = torch.nn.MarginRankingLoss(margin=args.margin)
+    optimizer = optim.SGD(tripletnet.parameters(), lr=args.lr, momentum=args.momentum)
+    for epoch in range(1, epochs + 1):
+        # train for one epoch
+        train_model(train_loader, tripletnet, criterion, optimizer, epoch)
+#        # evaluate on validation set
+#        acc = test(test_loader, tripletnet, criterion, epoch)
+#
+#        # remember best acc and save checkpoint
+#        is_best = acc > best_acc
+#        best_acc = max(acc, best_acc)
+        state = {
+            'epoch': epoch + 1,
+            'tripletnet_state_dict': tripletnet.state_dict(),
+            'state_dict': model.state_dict(),
+        }
+        torch.save(state, "checkpoints/new.pth")
 
-    def features_extraction(self, x):
-        x = self.conv1(x)
-        x = self.relu1(x)
-        x = self.pool1(x)
-        x = self.norm1(x)
-        x = self.conv2(x)
-        x = self.relu2(x)
-        x = self.pool2(x)
-        x = self.norm2(x)
-        x = self.conv3(x)
-        x = self.relu3(x)
-        x = self.conv4(x)
-        x = self.relu4(x)
-        x = self.conv5(x)
-#        return x.view(x.size(0), 256 * 13 * 13)
-        x = self.relu5(x)
-        x = self.conv6(x)
-        return x.view(x.size(0), 256 * 13 * 13)
-        x = self.relu6(x)
-        x = self.pool6(x)
-        x = x.view(x.size(0), 256 * 6 * 6)
-        x = self.fc7_new(x)
-        x = self.relu7(x)
-        x = self.fc8_new(x)
+def test(datapath):
+    model.eval()
+    model.training = False
 
-model = Net()
-if torch.cuda.is_available():
-    model.cuda()
+    normalize = transforms.Normalize(
+        #mean=[121.50361069 / 127., 122.37611083 / 127., 121.25987563 / 127.],
+        mean=[1., 1., 1.],
+        std=[1 / 127., 1 / 127., 1 / 127.]
+    )
 
-checkpoint = torch.load('checkpoints/hybridnet.pth')
-model.load_state_dict(checkpoint['state_dict'])
+    preprocess = transforms.Compose([
+        transforms.Resize(227),
+        transforms.CenterCrop(227),
+        transforms.ToTensor(),
+        normalize
+    ])
 
-model.train()
-model.training = False
+    with open(datapath, 'r') as reader:
+        reps = []
+        for image_path in reader:
+            image_path = image_path.strip()
+            image = Image.open(image_path).convert('RGB')
+            image_tensor = preprocess(image)
+            image_tensor.unsqueeze_(0)
+            image_variable = Variable(image_tensor).cuda()
+            features = model.features_extraction(image_variable)
+            reps.append(features)
 
-normalize = transforms.Normalize(
-   #mean=[121.50361069 / 127., 122.37611083 / 127., 121.25987563 / 127.],
-   mean=[1., 1., 1.],
-   std=[1 / 127., 1 / 127., 1 / 127.]
-)
-preprocess = transforms.Compose([
-   transforms.Resize(227),
-   transforms.CenterCrop(227),
-   transforms.ToTensor(),
-   normalize
-])
+        for i in range(len(reps)):
+            print ("\n\n")
+            for j in range(len(reps)):
+                d = np.asarray(reps[j].data - reps[i].data)
+                # similarity = np.dot(d, d)
+                similarity = np.linalg.norm(d)
+                print (i, j, similarity)
 
-"""
-image = Image.open(args.file).convert('RGB')
-image_tensor = preprocess(image)
-image_tensor.unsqueeze_(0)
-image_variable = Variable(image_tensor).cuda()
-features = model.features_extraction(image_variable)
-"""
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description='PyTorch on TORCS with Multi-modal')
 
-with open(args.file, 'r') as reader:
-    reps = []
-    for image_path in reader:
-        image_path = image_path.strip()
-        image = Image.open(image_path).convert('RGB')
-        image_tensor = preprocess(image)
-        image_tensor.unsqueeze_(0)
-        image_variable = Variable(image_tensor).cuda()
-        features = model.features_extraction(image_variable)
-        reps.append(features)
+    parser.add_argument('--mode', default='test', type=str, help='support option: train/test')
+    parser.add_argument('--datapath', default='datapath', type=str, help='path st_lucia dataset')
+    parser.add_argument('--bsize', default=64, type=int, help='minibatch size')
+    parser.add_argument('--margin', type=float, default=0.2, metavar='M', help='margin for triplet loss (default: 0.2)')
+    parser.add_argument('--lr', type=float, default=0.01, metavar='LR', help='learning rate (default: 0.01)')
+    parser.add_argument('--momentum', type=float, default=0.5, metavar='M', help='SGD momentum (default: 0.5)')
+    parser.add_argument('--tau', default=0.001, type=float, help='moving average for target network')
+    parser.add_argument('--debug', dest='debug', action='store_true')
+    parser.add_argument('--train_iter', default=20000000, type=int, help='train iters each timestep')
+    parser.add_argument('--epsilon', default=50000, type=int, help='linear decay of exploration policy')
+    parser.add_argument('--checkpoint', default="checkpoints", type=str, help='Checkpoint path')
+    args = parser.parse_args()
 
-    results = []
-    for i in range(len(reps)):
-        print ("\n\n")
-        result = []
-        for j in range(len(reps)):
-            d = np.asarray(reps[j].data - reps[i].data)
-            # similarity = np.dot(d, d)
-            similarity = np.linalg.norm(d)
-            print (i, j, similarity)
-#            result.append({'diff': math.fabs(i-j), 'similarity': similarity})
+    checkpoint = torch.load(args.checkpoint)
+    model.load_state_dict(checkpoint['state_dict'])
+    if torch.cuda.is_available():
+        model.cuda()
 
-        newlist = sorted(result, key=lambda k: k['similarity']) 
-        results.append(newlist)
+    args = parser.parse_args()
+    if args.mode == 'train':
+        train(args.datapath, args.train_iter, args)
+    elif args.mode == 'test':
+        test(args.datapath)
+    else:
+        raise RuntimeError('undefined mode {}'.format(args.mode))
 
-    results = np.asarray(results)
-#    print(results)
-
-#output = model(image_variable)
-#pred = output.data.max(1, keepdim=True)[1] # get the index of the max log-probability
-#prob = output.data.cpu().view(-1).numpy()
-#print (prob.max(), prob.argmax())
-#print (output, pred)
