@@ -236,12 +236,11 @@ class Net(nn.Module):
 #        return x.view(x.size(0), 256 * 13 * 13)
         x = self.relu5(x)
         x = self.conv6(x)
-        return x.view(x.size(0), 256 * 13 * 13)
+#        return x.view(x.size(0), 256 * 13 * 13)
         x = self.relu6(x)
         x = self.pool6(x)
+        return x.view(x.size(0), 256 * 6 * 6)
         x = x.view(x.size(0), 256 * 6 * 6)
         x = self.fc7_new(x)
         x = self.relu7(x)
         x = self.fc8_new(x)
-
-

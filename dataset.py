@@ -18,11 +18,13 @@ class TripletImageLoader(torch.utils.data.Dataset):
         self.data = {}
         self.pairs = []
         for index in open(os.path.join(self.base_path, "index.txt")):
+            print ("reading index: ", index)
             index = index.strip()
             data = []
             for line in open(os.path.join(self.base_path, index, "index.txt")):
                 data.append({'filename': line.rstrip('\n')})
 
+            print ("number of images: ", len(data))
             i = 0
             for line in open(os.path.join(self.base_path, index, "fGPS.txt")):
                 gps_info = line.rstrip('\n').split(",")
@@ -31,6 +33,7 @@ class TripletImageLoader(torch.utils.data.Dataset):
                 if (i >= len(data)):
                     break
 
+            print ("number of gps info: ", i)
             self.data[index] = data
 #            if (len(data) < self.size):
 #                self.size = len(data)
@@ -64,9 +67,11 @@ class TripletImageLoader(torch.utils.data.Dataset):
         return -1
 
     def make_pairs(self):
+        import time
         for i in list(self.data.keys()):
             positive_keys = list(self.data.keys())
             positive_keys.remove(i)
+            t1 = time.time()
             for anchor in self.data[i]:
                 for positive_index in positive_keys:
                     closest_sample = self.data[positive_index][0]
@@ -78,6 +83,8 @@ class TripletImageLoader(torch.utils.data.Dataset):
                             closest_sample = sample
                     if min_distance < 0.0002:
                         self.pairs.append(((i, anchor['filename']), (positive_index, closest_sample['filename'])))
+            t2 = time.time()
+            print (t2-t1)
         return self.pairs
 
     def __getitem__(self, index):

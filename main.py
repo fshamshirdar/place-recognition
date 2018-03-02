@@ -33,8 +33,9 @@ def train_model(train_loader, tripletnet, criterion, optimizer, epoch):
 
         # compute output
         dist_a, dist_b, embedded_x, embedded_y, embedded_z = tripletnet(anchor, positive, negative)
+        print (dist_a - dist_b)
         # 1 means, dist_a should be larger than dist_b
-        target = torch.FloatTensor(dist_a.size()).fill_(1)
+        target = torch.FloatTensor(dist_a.size()).fill_(-1)
         if torch.cuda.is_available():
             target = target.cuda()
         target = Variable(target)
@@ -65,7 +66,7 @@ def train(datapath, epochs, args):
         transforms.Resize(227),
         transforms.CenterCrop(227),
         transforms.ToTensor(),
-#        normalize
+        normalize
     ])
 
     kwargs = {'num_workers': 1, 'pin_memory': True} if torch.cuda.is_available() else {}
@@ -73,6 +74,7 @@ def train(datapath, epochs, args):
 
     tripletnet = TripletNet(model)
 
+#    criterion = torch.nn.TripletMarginLoss(margin=args.margin, p=2)
     criterion = torch.nn.MarginRankingLoss(margin=args.margin)
     optimizer = optim.SGD(tripletnet.parameters(), lr=args.lr, momentum=args.momentum)
     for epoch in range(1, epochs + 1):
@@ -132,20 +134,21 @@ if __name__ == "__main__":
 
     parser.add_argument('--mode', default='test', type=str, help='support option: train/test')
     parser.add_argument('--datapath', default='datapath', type=str, help='path st_lucia dataset')
-    parser.add_argument('--bsize', default=10, type=int, help='minibatch size')
-    parser.add_argument('--margin', type=float, default=0.2, metavar='M', help='margin for triplet loss (default: 0.2)')
+    parser.add_argument('--bsize', default=32, type=int, help='minibatch size')
+    parser.add_argument('--margin', type=float, default=0.5, metavar='M', help='margin for triplet loss (default: 0.2)')
     parser.add_argument('--lr', type=float, default=0.01, metavar='LR', help='learning rate (default: 0.01)')
     parser.add_argument('--momentum', type=float, default=0.5, metavar='M', help='SGD momentum (default: 0.5)')
     parser.add_argument('--tau', default=0.001, type=float, help='moving average for target network')
     parser.add_argument('--debug', dest='debug', action='store_true')
     parser.add_argument('--train_iter', default=20000000, type=int, help='train iters each timestep')
     parser.add_argument('--epsilon', default=50000, type=int, help='linear decay of exploration policy')
-    parser.add_argument('--checkpoint', default="checkpoints", type=str, help='Checkpoint path')
+    parser.add_argument('--checkpoint', default=None, type=str, help='Checkpoint path')
     args = parser.parse_args()
 
-    global model
-    checkpoint = torch.load(args.checkpoint)
-    model.load_state_dict(checkpoint['state_dict'])
+    if args.checkpoint is not None:
+        checkpoint = torch.load(args.checkpoint)
+        model.load_state_dict(checkpoint['state_dict'])
+
     if torch.cuda.is_available():
         model.cuda()
 
