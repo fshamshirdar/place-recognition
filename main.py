@@ -1,4 +1,5 @@
 import io
+import os
 from PIL import Image
 import numpy as np
 import time
@@ -51,23 +52,10 @@ def train_model(train_loader, tripletnet, criterion, optimizer, epoch):
 
         print (loss)
 
-def train(datapath, epochs, args):
+def train(datapath, epochs, preprocess, args):
     global model
 
     model.train()
-
-    normalize = transforms.Normalize(
-        #mean=[121.50361069 / 127., 122.37611083 / 127., 121.25987563 / 127.],
-        mean=[1., 1., 1.],
-        std=[1 / 127., 1 / 127., 1 / 127.]
-    )
-
-    preprocess = transforms.Compose([
-        transforms.Resize(227),
-        transforms.CenterCrop(227),
-        transforms.ToTensor(),
-        normalize
-    ])
 
     kwargs = {'num_workers': 1, 'pin_memory': True} if torch.cuda.is_available() else {}
     train_loader = torch.utils.data.DataLoader(TripletImageLoader(datapath, size=100000, transform=preprocess), batch_size=args.bsize, shuffle=True, **kwargs)
@@ -93,41 +81,37 @@ def train(datapath, epochs, args):
         }
         torch.save(state, "checkpoints/new.pth")
 
-def test(datapath):
+def test(datapath, preprocess):
     model.eval()
     model.training = False
 
-    normalize = transforms.Normalize(
-        #mean=[121.50361069 / 127., 122.37611083 / 127., 121.25987563 / 127.],
-        mean=[1., 1., 1.],
-        std=[1 / 127., 1 / 127., 1 / 127.]
-    )
-
-    preprocess = transforms.Compose([
-        transforms.Resize(227),
-        transforms.CenterCrop(227),
-        transforms.ToTensor(),
-        normalize
-    ])
-
-    with open(datapath, 'r') as reader:
+    with open(os.path.join(datapath, "index.txt"), 'r') as reader:
         reps = []
-        for image_path in reader:
-            image_path = image_path.strip()
-            image = Image.open(image_path).convert('RGB')
-            image_tensor = preprocess(image)
-            image_tensor.unsqueeze_(0)
-            image_variable = Variable(image_tensor).cuda()
-            features = model.features_extraction(image_variable)
-            reps.append(features)
+        for index in reader:
+            index = index.strip()
+            with open(os.path.join(datapath, index, "index.txt"), 'r') as image_reader:
+                for image_path in image_reader:
+                    print (image_path)
+                    image_path = image_path.strip()
+                    image = Image.open(os.path.join(datapath, index, image_path)).convert('RGB')
+                    image_tensor = preprocess(image)
 
-        for i in range(len(reps)):
-            print ("\n\n")
-            for j in range(len(reps)):
-                d = np.asarray(reps[j].data - reps[i].data)
-                # similarity = np.dot(d, d)
-                similarity = np.linalg.norm(d)
-                print (i, j, similarity)
+#                    plt.figure()
+#                    plt.imshow(image_tensor.cpu().numpy().transpose((1, 2, 0)))
+#                    plt.show()
+
+                    image_tensor.unsqueeze_(0)
+                    image_variable = Variable(image_tensor).cuda()
+                    features = model.features_extraction(image_variable)
+                    reps.append(features.data.cpu())
+
+                for i in range(len(reps)):
+                    print ("\n\n")
+                    for j in range(len(reps)):
+                        d = np.asarray(reps[j] - reps[i])
+                        # similarity = np.dot(d, d)
+                        similarity = np.linalg.norm(d)
+                        print (i, j, similarity)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='PyTorch on TORCS with Multi-modal')
@@ -145,6 +129,19 @@ if __name__ == "__main__":
     parser.add_argument('--checkpoint', default=None, type=str, help='Checkpoint path')
     args = parser.parse_args()
 
+    normalize = transforms.Normalize(
+        #mean=[121.50361069 / 127., 122.37611083 / 127., 121.25987563 / 127.],
+        mean=[1., 1., 1.],
+        std=[1 / 127., 1 / 127., 1 / 127.]
+    )
+
+    preprocess = transforms.Compose([
+        transforms.Resize(227),
+        transforms.CenterCrop(227),
+        transforms.ToTensor(),
+        normalize
+    ])
+
     if args.checkpoint is not None:
         checkpoint = torch.load(args.checkpoint)
         model.load_state_dict(checkpoint['state_dict'])
@@ -154,9 +151,9 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     if args.mode == 'train':
-        train(args.datapath, args.train_iter, args)
+        train(args.datapath, args.train_iter, preprocess, args)
     elif args.mode == 'test':
-        test(args.datapath)
+        test(args.datapath, preprocess)
     else:
         raise RuntimeError('undefined mode {}'.format(args.mode))
 
