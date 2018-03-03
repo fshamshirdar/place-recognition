@@ -87,6 +87,7 @@ def test(datapath, preprocess):
     model.training = False
 
     with open(os.path.join(datapath, "index.txt"), 'r') as reader:
+        import torch.nn.functional as F
         reps = []
         for index in reader:
             index = index.strip()
@@ -103,16 +104,21 @@ def test(datapath, preprocess):
 
                     image_tensor.unsqueeze_(0)
                     image_variable = Variable(image_tensor).cuda()
-                    features = model.features_extraction(image_variable)
+                    features = model(image_variable)
                     reps.append(features.data.cpu())
 
                 for i in range(len(reps)):
                     print ("\n\n")
                     for j in range(len(reps)):
-                        d = np.asarray(reps[j] - reps[i])
-                        # similarity = np.dot(d, d)
-                        similarity = np.linalg.norm(d)
-                        print (i, j, similarity)
+                        # d = np.asarray(reps[j] - reps[i])
+                        # similarity = np.linalg.norm(d)
+                        # print (i, j, similarity)
+
+                        similarity = F.pairwise_distance(reps[j], reps[i], 2)
+                        print (i, j, similarity[0][0])
+
+                        # similarity = F.cosine_similarity(reps[j], reps[i])
+                        # print (i, j, similarity[0])
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='PyTorch on TORCS with Multi-modal')
