@@ -12,12 +12,12 @@ import torch.optim as optim
 from torchvision import transforms
 from torch.autograd import Variable
 
-import model
+from placenet import PlaceNet
 from dataset import TripletImageLoader
 from tripletnet import TripletNet
 from l2normalize import L2Normalize
 
-model = model.Net()
+model = PlaceNet()
 
 def train_model(train_loader, tripletnet, criterion, optimizer, epoch):
     # switch to train mode
@@ -140,8 +140,8 @@ if __name__ == "__main__":
 
     normalize = transforms.Normalize(
         #mean=[121.50361069 / 127., 122.37611083 / 127., 121.25987563 / 127.],
-        mean=[1., 1., 1.],
-        std=[1 / 127., 1 / 127., 1 / 127.]
+        mean=[127. / 255., 127. / 255., 127. / 255.],
+        std=[1 / 255., 1 / 255., 1 / 255.]
     )
 
     preprocess = transforms.Compose([

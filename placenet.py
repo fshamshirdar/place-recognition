@@ -84,9 +84,9 @@ class Reshape(nn.Module):
         return x.view(*new_dims).contiguous()
 """
 
-class Net(nn.Module):
+class PlaceNet(nn.Module):
     def __init__(self):
-        super(Net, self).__init__()
+        super(PlaceNet, self).__init__()
 
         self.conv1 = nn.Conv2d(3, 96, kernel_size=11, stride=4, padding=0)
         self.relu1 = nn.ReLU(inplace=True)
