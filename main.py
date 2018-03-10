@@ -65,7 +65,7 @@ def train(datapath, checkpoint_path, epochs, args):
 
 #    criterion = torch.nn.TripletMarginLoss(margin=args.margin, p=2)
     criterion = torch.nn.MarginRankingLoss(margin=args.margin)
-    optimizer = optim.SGD(tripletnet.parameters(), lr=args.lr, momentum=args.momentum)
+    optimizer = optim.SGD(tripletnet.parameters(), lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
     for epoch in range(1, epochs + 1):
         # train for one epoch
         train_model(train_loader, tripletnet, criterion, optimizer, epoch)
@@ -129,6 +129,7 @@ if __name__ == "__main__":
     parser.add_argument('--margin', type=float, default=0.2, metavar='M', help='margin for triplet loss (default: 0.2)')
     parser.add_argument('--lr', type=float, default=0.0001, metavar='LR', help='learning rate (default: 0.0001)')
     parser.add_argument('--momentum', type=float, default=0.5, metavar='M', help='SGD momentum (default: 0.5)')
+    parser.add_argument('--weight_decay', type=float, default=1e-4, metavar='M', help='SGD momentum (default: 0.5)')
     parser.add_argument('--tau', default=0.001, type=float, help='moving average for target network')
     parser.add_argument('--debug', dest='debug', action='store_true')
     parser.add_argument('--train_iter', default=20000000, type=int, help='train iters each timestep')
